@@ -394,7 +394,9 @@ async function propose() {
 上記はサンプルです。月〜日の7日分をすべて生成してください。
 ingredientsのbaseは${people}人分の数値で記載してください。
 unitフィールドも必ず追加してください。野菜・豆腐・卵などは売り場で買いやすい単位（束・個・丁・袋・枚など）を使い、肉・魚・調味料はg/mlを使ってください。
-例：ほうれん草→base:1,unit:"束"、じゃがいも→base:3,unit:"個"、豚こま→base:200,unit:"g"、卵→base:4,unit:"個"`;
+例：ほうれん草→base:1,unit:"束"、じゃがいも→base:3,unit:"個"、豚こま→base:200,unit:"g"、卵→base:4,unit:"個"、キャベツ→base:1,unit:"玉"
+重要：baseは必ず1以上の正の整数にすること。0は絶対に使わないこと。
+重要：主食と主菜は必ず別の料理にすること。例えば主食が「カレーライス」なら主菜は「チキンカレー」ではなく「鶏肉のカレー煮込み」のように、主食はご飯・麺・パンの種類、主菜はおかずの料理名にすること。丼・麺・チャーハンなど一品料理の場合は主食を「白米」「麺」とし、主菜にその料理名を入れること。`;
 
   try {
     let res;
@@ -643,9 +645,9 @@ function renderShop() {
   currentData.menus.forEach(m => {
     (m.ingredients || []).forEach(ing => {
       const unit = ing.unit || 'g';
-      const amt = Math.round(ing.base);
+      const raw = Math.round(ing.base);
+      const amt = raw < 1 ? 1 : raw; // 0以下は最低1にする
       if (totals[ing.name]) {
-        // 同じ単位なら加算、違う単位なら大きい方を使う
         if (totals[ing.name].unit === unit) {
           totals[ing.name].amt += amt;
         } else {
