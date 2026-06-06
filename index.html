@@ -212,6 +212,14 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 .photo-viewer img{max-width:95vw;max-height:85vh;border-radius:12px;object-fit:contain;}
 .photo-viewer-close{position:absolute;top:20px;right:20px;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.2);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
 
+/* 複数写真選択 */
+.photo-preview-area{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
+.photo-preview-item{position:relative;width:80px;height:80px;}
+.photo-preview-img{width:80px;height:80px;border-radius:10px;object-fit:cover;border:1.5px solid var(--border);cursor:pointer;}
+.photo-preview-del{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#C0392B;color:#fff;border:none;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;}
+.photo-read-btn{width:100%;padding:11px;background:var(--secondary);color:#fff;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;margin-top:10px;display:none;}
+.photo-read-btn.show{display:block;}
+
 /* API KEY */
 .apikey-screen{position:fixed;inset:0;background:var(--bg);z-index:300;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;}
 .apikey-screen.hidden{display:none;}
@@ -307,11 +315,13 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
     </div>
   </div>
   <div class="add-card">
-    <div class="add-lbl">📷 写真から登録（料理本・レシピカード）</div>
+    <div class="add-lbl">📷 写真から登録（複数枚OK）</div>
     <button class="photo-btn" onclick="document.getElementById('photoInput').click()">
-      📷 カメラで撮影 / 写真を選ぶ
+      📷 写真を追加（複数枚選べます）
     </button>
-    <input type="file" id="photoInput" accept="image/*" style="display:none" onchange="addFromPhoto(this)">
+    <input type="file" id="photoInput" accept="image/*" multiple style="display:none" onchange="addPhotoPreview(this)">
+    <div class="photo-preview-area" id="photoPreviewArea"></div>
+    <button class="photo-read-btn" id="photoReadBtn" onclick="addFromPhotos()">📖 まとめて読み取る</button>
   </div>
   <div class="adding-card" id="addingCard">
     <div class="spin-sm"></div>
@@ -667,32 +677,72 @@ JSON形式のみで返答（説明不要）:
 }
 
 // ===== PHOTO =====
-async function addFromPhoto(input){
-  if(!input.files||!input.files[0]) return;
-  const apikey=await store.get('apikey'); if(!apikey){ showApiKeyScreen(); return; }
-  showAdding('📷 写真を解析してレシピを読み取り中…');
+let pendingPhotos = []; // {dataUrl, mediaType}
 
-  const reader=new FileReader();
-  reader.onload=async e=>{
-    const b64=e.target.result.split(',')[1];
-    const mediaType=input.files[0].type||'image/jpeg';
-    const prompt=`この写真はレシピ本またはレシピカードです。写真に書かれているレシピを正確に読み取ってください。
+function addPhotoPreview(input) {
+  if (!input.files || !input.files.length) return;
+  const files = Array.from(input.files);
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      pendingPhotos.push({ dataUrl: e.target.result, mediaType: file.type || 'image/jpeg' });
+      renderPhotoPreview();
+    };
+    reader.readAsDataURL(file);
+  });
+  input.value = '';
+}
+
+function renderPhotoPreview() {
+  const area = document.getElementById('photoPreviewArea');
+  const btn = document.getElementById('photoReadBtn');
+  area.innerHTML = pendingPhotos.map((p, i) => `
+    <div class="photo-preview-item">
+      <img class="photo-preview-img" src="${p.dataUrl}" onclick="openPhotoViewer('${p.dataUrl}')">
+      <button class="photo-preview-del" onclick="removePreviewPhoto(${i})">✕</button>
+    </div>`).join('');
+  btn.classList.toggle('show', pendingPhotos.length > 0);
+  btn.textContent = `📖 ${pendingPhotos.length}枚をまとめて読み取る`;
+}
+
+function removePreviewPhoto(idx) {
+  pendingPhotos.splice(idx, 1);
+  renderPhotoPreview();
+}
+
+async function addFromPhotos() {
+  if (!pendingPhotos.length) return;
+  const apikey = await store.get('apikey');
+  if (!apikey) { showApiKeyScreen(); return; }
+  showAdding(`📷 ${pendingPhotos.length}枚の写真を解析中…`);
+
+  // 複数枚をcontent配列に変換
+  const imageContents = pendingPhotos.map(p => ({
+    type: 'image',
+    source: { type: 'base64', media_type: p.mediaType, data: p.dataUrl.split(',')[1] }
+  }));
+  const prompt = `これらの写真はレシピ本またはレシピカードです。複数枚にまたがっている場合も含め、写真に書かれているレシピをすべて統合して正確に読み取ってください。
 JSON形式のみで返答（説明不要）:
 {"name":"料理名","time":"調理時間","category":"主菜","ingredients":[{"name":"食材名","amount":"量"}],"steps":[{"text":"手順","tip":"コツ（なければ空文字）"}],"points":["ポイント1","ポイント2"]}`;
 
-    try{
-      const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apikey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:1000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:mediaType,data:b64}},{type:'text',text:prompt}]}]})});
-      const data=await res.json();
-      const parsed=JSON.parse(data.content[0].text.replace(/```json|```/g,'').trim());
-      const recipe={id:'r'+Date.now(),source:'photo',...parsed};
-      myRecipes.unshift(recipe);
-      await saveMyRecipes();
-      renderRecipes();
-      showToast('✅ レシピを登録しました！');
-    }catch(e){ showToast('⚠️ 読み取りに失敗しました。写真を確認してください'); }
-    finally{ hideAdding(); input.value=''; }
-  };
-  reader.readAsDataURL(input.files[0]);
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apikey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 1500,
+        messages: [{ role: 'user', content: [...imageContents, { type: 'text', text: prompt }] }] })
+    });
+    const data = await res.json();
+    const parsed = JSON.parse(data.content[0].text.replace(/```json|```/g, '').trim());
+    const recipe = { id: 'r' + Date.now(), source: 'photo', ...parsed };
+    myRecipes.unshift(recipe);
+    await saveMyRecipes();
+    renderRecipes();
+    pendingPhotos = [];
+    renderPhotoPreview();
+    showToast('✅ レシピを登録しました！');
+  } catch(e) { showToast('⚠️ 読み取りに失敗しました。写真を確認してください'); }
+  finally { hideAdding(); }
 }
 
 function showAdding(msg){ document.getElementById('addingTxt').textContent=msg; document.getElementById('addingCard').classList.add('show'); }
