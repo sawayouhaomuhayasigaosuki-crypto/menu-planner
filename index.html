@@ -212,6 +212,20 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 .photo-viewer img{max-width:95vw;max-height:85vh;border-radius:12px;object-fit:contain;}
 .photo-viewer-close{position:absolute;top:20px;right:20px;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.2);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
 
+/* 人数確認モーダル */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:350;display:none;align-items:center;justify-content:center;padding:24px;}
+.modal-overlay.open{display:flex;}
+.modal-card{background:var(--card);border-radius:var(--radius);padding:22px;width:100%;max-width:320px;box-shadow:var(--shadow);}
+.modal-title{font-size:15px;font-weight:700;margin-bottom:6px;}
+.modal-sub{font-size:12px;color:var(--text-sub);margin-bottom:16px;line-height:1.6;}
+.modal-people-row{display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:20px;}
+.modal-p-btn{width:36px;height:36px;border-radius:50%;border:none;background:var(--primary);color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.modal-p-cnt{font-size:28px;font-weight:700;min-width:40px;text-align:center;}
+.modal-p-unit{font-size:14px;color:var(--text-sub);}
+.modal-btns{display:flex;gap:8px;}
+.modal-cancel{flex:1;padding:11px;background:var(--bg);border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;color:var(--text-sub);}
+.modal-ok{flex:2;padding:11px;background:var(--primary);color:#fff;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;}
+
 /* 複数写真選択 */
 .photo-preview-area{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
 .photo-preview-item{position:relative;width:80px;height:80px;}
@@ -375,6 +389,24 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
     <button class="edit-save-btn" onclick="saveEdit()">保存</button>
   </div>
   <div class="edit-body" id="editBody"></div>
+</div>
+
+<!-- 人数確認モーダル -->
+<div class="modal-overlay" id="peopleModal">
+  <div class="modal-card">
+    <div class="modal-title">📖 レシピの人数を確認</div>
+    <div class="modal-sub">写真のレシピは何人分ですか？<br>アプリの人数設定（<span id="modalAppPeople"></span>人）に合わせて材料を自動調整します。</div>
+    <div class="modal-people-row">
+      <button class="modal-p-btn" onclick="chgModalPeople(-1)">−</button>
+      <span class="modal-p-cnt" id="modalPeopleCnt">2</span>
+      <span class="modal-p-unit">人分</span>
+      <button class="modal-p-btn" onclick="chgModalPeople(1)">＋</button>
+    </div>
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeModal()">キャンセル</button>
+      <button class="modal-ok" onclick="confirmPeopleAndSave()">この人数で登録</button>
+    </div>
+  </div>
 </div>
 
 <!-- 写真フルスクリーン -->
@@ -666,12 +698,9 @@ JSON形式のみで返答（説明不要）:
     const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apikey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:1000,messages:[{role:'user',content:prompt}]})});
     const data=await res.json();
     const parsed=JSON.parse(data.content[0].text.replace(/```json|```/g,'').trim());
-    const recipe={id:'r'+Date.now(),source:'youtube',url,...parsed};
-    myRecipes.unshift(recipe);
-    await saveMyRecipes();
-    renderRecipes();
+    pendingRecipe = {id:'r'+Date.now(),source:'youtube',url,...parsed};
     document.getElementById('ytUrl').value='';
-    showToast('✅ レシピを登録しました！');
+    openPeopleModal();
   }catch(e){ showToast('⚠️ 読み込みに失敗しました'); }
   finally{ hideAdding(); }
 }
@@ -734,15 +763,69 @@ JSON形式のみで返答（説明不要）:
     });
     const data = await res.json();
     const parsed = JSON.parse(data.content[0].text.replace(/```json|```/g, '').trim());
-    const recipe = { id: 'r' + Date.now(), source: 'photo', ...parsed };
-    myRecipes.unshift(recipe);
-    await saveMyRecipes();
-    renderRecipes();
-    pendingPhotos = [];
-    renderPhotoPreview();
-    showToast('✅ レシピを登録しました！');
+    // 人数確認モーダルを表示してから保存
+    pendingRecipe = { id: 'r' + Date.now(), source: 'photo', ...parsed };
+    openPeopleModal();
   } catch(e) { showToast('⚠️ 読み取りに失敗しました。写真を確認してください'); }
   finally { hideAdding(); }
+}
+
+// ===== 人数確認モーダル =====
+let pendingRecipe = null;
+let modalPeople = 2;
+
+function openPeopleModal() {
+  modalPeople = 2; // デフォルト2人分
+  document.getElementById('modalPeopleCnt').textContent = modalPeople;
+  document.getElementById('modalAppPeople').textContent = people;
+  document.getElementById('peopleModal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('peopleModal').classList.remove('open');
+  pendingRecipe = null;
+  pendingPhotos = [];
+  renderPhotoPreview();
+}
+
+function chgModalPeople(d) {
+  modalPeople = Math.max(1, Math.min(10, modalPeople + d));
+  document.getElementById('modalPeopleCnt').textContent = modalPeople;
+}
+
+async function confirmPeopleAndSave() {
+  if (!pendingRecipe) return;
+
+  // 人数スケール処理
+  const ratio = people / modalPeople;
+  if (ratio !== 1 && pendingRecipe.ingredients) {
+    pendingRecipe.ingredients = pendingRecipe.ingredients.map(ing => {
+      // 数値部分を抽出してスケール
+      const scaled = scaleAmount(ing.amount, ratio);
+      return { ...ing, amount: scaled };
+    });
+  }
+
+  // 元の人数情報も保存
+  pendingRecipe.originalPeople = modalPeople;
+  pendingRecipe.scaledTo = people;
+
+  myRecipes.unshift(pendingRecipe);
+  await saveMyRecipes();
+  renderRecipes();
+  closeModal();
+  showToast(`✅ ${people}人分に換算して登録しました！`);
+}
+
+function scaleAmount(amountStr, ratio) {
+  if (!amountStr) return amountStr;
+  // 数値を含む文字列をスケール（例："200g" → "400g"、"大さじ2" → "大さじ4"）
+  return amountStr.replace(/[\d.]+/g, match => {
+    const num = parseFloat(match);
+    if (isNaN(num)) return match;
+    const scaled = Math.round(num * ratio * 10) / 10;
+    return scaled % 1 === 0 ? scaled.toString() : scaled.toFixed(1);
+  });
 }
 
 function showAdding(msg){ document.getElementById('addingTxt').textContent=msg; document.getElementById('addingCard').classList.add('show'); }
