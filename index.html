@@ -212,6 +212,27 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 .photo-viewer img{max-width:95vw;max-height:85vh;border-radius:12px;object-fit:contain;}
 .photo-viewer-close{position:absolute;top:20px;right:20px;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.2);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
 
+/* 設定モーダル */
+.settings-btn{position:fixed;bottom:16px;right:16px;width:44px;height:44px;border-radius:50%;background:var(--secondary);color:#fff;border:none;font-size:20px;cursor:pointer;box-shadow:var(--shadow);z-index:150;display:flex;align-items:center;justify-content:center;}
+.settings-sheet{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-radius:22px 22px 0 0;z-index:201;max-height:88vh;transform:translateY(100%);transition:transform .35s cubic-bezier(.32,.72,0,1);display:flex;flex-direction:column;}
+.settings-sheet.open{transform:translateY(0);}
+.settings-hdr{padding:14px 20px 12px;border-bottom:1px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:space-between;}
+.settings-title{font-size:16px;font-weight:700;}
+.settings-body{overflow-y:auto;flex:1;padding:16px 20px 40px;}
+.settings-sec{margin-bottom:20px;}
+.settings-sec-title{font-size:12px;font-weight:700;color:var(--text-sub);margin-bottom:12px;display:flex;align-items:center;gap:6px;}
+.settings-sec-title::before{content:'';display:block;width:3px;height:14px;background:var(--secondary);border-radius:2px;}
+.settings-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.settings-row-label{font-size:13px;font-weight:500;}
+.settings-row-sub{font-size:11px;color:var(--text-sub);margin-top:2px;}
+.ratio-display{display:flex;gap:6px;margin-bottom:10px;}
+.ratio-bar{flex:1;height:10px;border-radius:5px;overflow:hidden;display:flex;}
+.ratio-bar-my{background:var(--primary);transition:flex .3s;}
+.ratio-bar-ai{background:var(--secondary-light);transition:flex .3s;}
+.ratio-labels{display:flex;justify-content:space-between;font-size:11px;color:var(--text-sub);margin-bottom:10px;}
+.ratio-slider{width:100%;accent-color:var(--primary);margin-bottom:6px;}
+.ratio-count{text-align:center;font-size:13px;font-weight:700;color:var(--primary);}
+
 /* インポートモーダル */
 .import-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:350;display:none;align-items:flex-end;justify-content:center;}
 .import-modal-overlay.open{display:flex;}
@@ -341,6 +362,13 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   </div>
 
   <div class="add-card">
+    <div class="add-lbl">📝 テキストを貼り付けて登録（レシピサイトなど）</div>
+    <button class="photo-btn" onclick="openTextModal()" style="border-style:solid;border-color:var(--primary);color:var(--primary);">
+      📝 レシピの文章を貼り付ける
+    </button>
+  </div>
+
+  <div class="add-card">
     <div class="add-lbl">🎬 YouTubeから登録</div>
     <div class="yt-row">
       <input class="yt-input" id="ytUrl" placeholder="YouTubeのURLを貼り付け…">
@@ -410,6 +438,20 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   <div class="edit-body" id="editBody"></div>
 </div>
 
+<!-- テキスト貼り付けモーダル -->
+<div class="import-modal-overlay" id="textModal">
+  <div class="import-modal-card">
+    <div class="import-modal-title">📝 レシピの文章を貼り付け</div>
+    <div class="import-modal-sub">レシピサイトのページで料理名・材料・作り方を選択コピーして貼り付けてください。AIが整形して登録します。</div>
+    <input class="edit-input" id="textUrlInput" placeholder="参考URL（任意・あとで開けます）" style="margin-bottom:8px;">
+    <textarea class="import-textarea" id="textInput" placeholder="例：&#10;鶏の照り焼き&#10;材料（2人分）&#10;鶏もも肉 2枚&#10;醤油 大さじ2&#10;...&#10;作り方&#10;1. 鶏肉を...&#10;2. ..."></textarea>
+    <div class="import-btns">
+      <button class="import-cancel" onclick="closeTextModal()">キャンセル</button>
+      <button class="import-ok" onclick="executeTextImport()" style="background:var(--primary);">📝 レシピ化する</button>
+    </div>
+  </div>
+</div>
+
 <!-- インポートモーダル -->
 <div class="import-modal-overlay" id="importModal">
   <div class="import-modal-card">
@@ -445,6 +487,79 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 <div class="photo-viewer" id="photoViewer" onclick="closePhotoViewer()">
   <button class="photo-viewer-close">✕</button>
   <img id="photoViewerImg" src="" alt="">
+</div>
+
+<!-- 設定ボタン -->
+<button class="settings-btn" onclick="openSettings()">⚙️</button>
+
+<!-- 設定シート -->
+<div class="overlay" id="settingsOverlay" onclick="closeSettings()" style="z-index:200;"></div>
+<div class="settings-sheet" id="settingsSheet">
+  <div class="bs-handle-area"><div class="bs-handle"></div></div>
+  <div class="settings-hdr">
+    <div class="settings-title">⚙️ 設定</div>
+    <button class="bs-close" onclick="closeSettings()">✕</button>
+  </div>
+  <div class="settings-body">
+
+    <!-- マイレシピ比率 -->
+    <div class="settings-sec">
+      <div class="settings-sec-title">献立提案の比率（7日分）</div>
+      <div class="ratio-display">
+        <div class="ratio-bar">
+          <div class="ratio-bar-my" id="ratioBarMy"></div>
+          <div class="ratio-bar-ai" id="ratioBarAi"></div>
+        </div>
+      </div>
+      <div class="ratio-labels">
+        <span>📖 マイレシピ <span id="ratioMyCount">3</span>日</span>
+        <span>🤖 AI提案 <span id="ratioAiCount">4</span>日</span>
+      </div>
+      <input class="ratio-slider" type="range" id="ratioSlider" min="0" max="7" value="3" oninput="updateRatio(this.value)">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-sub);">
+        <span>AI任せ</span>
+        <span>マイレシピのみ</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-sub);margin-top:8px;line-height:1.6;background:var(--bg);padding:8px 12px;border-radius:8px;">
+        💡 マイレシピが少ない場合は自動的にAI提案で補完されます
+      </div>
+    </div>
+
+    <!-- 人数 -->
+    <div class="settings-sec">
+      <div class="settings-sec-title">デフォルト人数</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">食事人数</div>
+          <div class="settings-row-sub">献立提案・買い物リストの基準人数</div>
+        </div>
+        <div class="people-row" style="background:var(--bg);">
+          <button class="p-btn" onclick="chgPeople(-1)">−</button>
+          <span class="p-cnt" id="settingsPeopleCnt">3</span>
+          <span class="p-unit">人</span>
+          <button class="p-btn" onclick="chgPeople(1)">＋</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- APIキー -->
+    <div class="settings-sec">
+      <div class="settings-sec-title">APIキー</div>
+      <button style="width:100%;padding:11px;background:var(--bg);border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;color:var(--text);" onclick="showApiKeyScreen();closeSettings();">
+        🔑 APIキーを変更
+      </button>
+    </div>
+
+    <!-- マイレシピ管理 -->
+    <div class="settings-sec">
+      <div class="settings-sec-title">マイレシピ管理</div>
+      <div style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">登録済み：<span id="settingsRecipeCount">0</span>件</div>
+      <button style="width:100%;padding:11px;background:#FEE;border:1.5px solid #F99;border-radius:var(--radius-sm);font-size:13px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;color:#C0392B;" onclick="clearAllRecipes()">
+        🗑 マイレシピをすべて削除
+      </button>
+    </div>
+
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -498,6 +613,8 @@ async function init(){
   const sr = await store.get('myRecipes');
   if(sr){ try{ myRecipes=JSON.parse(sr); }catch(e){ myRecipes=[]; } }
   renderRecipes();
+  const savedRatio = await store.get('myRecipeRatio');
+  if(savedRatio) myRecipeRatio = parseInt(savedRatio);
 }
 init();
 
@@ -537,9 +654,24 @@ async function propose(){
   const avoid=document.getElementById('avoidIn').value.trim();
   setLoading(true); hideErr();
 
+  // マイレシピからランダムに3〜4品ピックアップ
+  const DAYS = ['月','火','水','木','金','土','日'];
+  let myRecipeHint = '';
+  if (myRecipes.length > 0) {
+    const shuffled = [...myRecipes].sort(() => Math.random() - 0.5);
+    const savedRatio = await store.get('myRecipeRatio');
+    const targetCount = savedRatio ? parseInt(savedRatio) : 3;
+    const pickCount = Math.min(myRecipes.length, targetCount);
+    const picked = shuffled.slice(0, pickCount);
+    // ランダムな曜日に割り当て
+    const assignedDays = [...DAYS].sort(() => Math.random() - 0.5).slice(0, picked.length);
+    myRecipeHint = '\n\n【マイレシピから使ってほしい料理（指定曜日の主菜に採用すること）】\n' +
+      picked.map((r, i) => `${assignedDays[i]}曜：${r.name}（${r.category||'主菜'}）`).join('\n');
+  }
+
   const prompt=`一週間分（月〜日）の夕食献立をJSON形式で返してください。
 条件：人数${people}人、要望：${tags.join('、')||'なし'}、除外食材：${avoid||'なし'}
-ルール：各日に主食・主菜・副菜・汁物の4品。主食は白米だけでなくパスタ・うどん・丼・パンなどバリエーションをつける。食材の使い回しを考慮する。
+ルール：各日に主食・主菜・副菜・汁物の4品。主食は白米だけでなくパスタ・うどん・丼・パンなどバリエーションをつける。食材の使い回しを考慮する。毎回異なるバリエーションの献立にすること。${myRecipeHint}
 必ず以下のJSON構造のみを返してください。前置き・説明・マークダウン記法は一切不要です。{で始めて}で終わること。
 {"menus":[{"day":"月","staple":{"name":"白米"},"main":{"name":"豚の生姜焼き","time":"20分"},"side":{"name":"ほうれん草のお浸し","time":"10分"},"soup":{"name":"味噌汁","time":"5分"},"ingredients":[{"cat":"肉・魚","name":"豚ロース","base":200,"unit":"g"},{"cat":"野菜","name":"玉ねぎ","base":1,"unit":"個"}]}],"prep":{"makeAhead":[{"id":"p1","days":["木"],"title":"ひじきの煮物","desc":"日曜に仕込んでおくと木曜まで保存OK"}],"marinade":[{"id":"m1","days":["月"],"title":"豚肉の下味冷凍","desc":"ジップロックに豚肉＋醤油大1・みりん大1・生姜を入れて冷凍"}],"cut":[{"id":"c1","days":["水"],"title":"カレー用野菜カット","desc":"火曜夜にじゃがいも・にんじん・玉ねぎをカットして冷蔵保存"}]}}
 月〜日の7日分をすべて生成してください。ingredientsのbaseは${people}人分の数値。unitフィールド必須（野菜・豆腐・卵は束・個・丁・袋・枚など、肉・魚・調味料はg/ml）。baseは1以上の正の整数。主食と主菜は別の料理にすること。`;
@@ -694,9 +826,9 @@ function renderRecipes(){
   }
   grid.innerHTML=myRecipes.map(r=>`
     <div class="recipe-card" onclick="openMyRecipeSheet('${r.id}')">
-      <div class="recipe-thumb ${r.source==='youtube'?'yt':r.source==='import'?'':' photo'}">${r.source==='youtube'?'🎬':r.source==='import'?'📥':'📷'}</div>
+      <div class="recipe-thumb ${r.source==='youtube'?'yt':r.source==='photo'?' photo':''}">${r.source==='youtube'?'🎬':r.source==='import'?'📥':r.source==='text'?'📝':'📷'}</div>
       <div class="recipe-info">
-        <div class="recipe-source ${r.source==='youtube'?'src-yt':'src-photo'}">${r.source==='youtube'?'🎬 YouTube':r.source==='import'?'📥 インポート':'📷 写真'}</div>
+        <div class="recipe-source ${r.source==='youtube'?'src-yt':'src-photo'}">${r.source==='youtube'?'🎬 YouTube':r.source==='import'?'📥 インポート':r.source==='text'?'📝 テキスト':'📷 写真'}</div>
         <div class="recipe-name">${r.name}</div>
         <div class="recipe-tags">
           ${r.time?`<span class="recipe-tag time">⏱ ${r.time}</span>`:''}
@@ -799,6 +931,89 @@ JSON形式のみで返答（説明不要）:
     pendingRecipe = { id: 'r' + Date.now(), source: 'photo', ...parsed };
     openPeopleModal();
   } catch(e) { showToast('⚠️ 読み取りに失敗しました。写真を確認してください'); }
+  finally { hideAdding(); }
+}
+
+// ===== 設定 =====
+let myRecipeRatio = 3; // デフォルト3日分
+
+async function openSettings() {
+  // 最新の値を反映
+  const savedRatio = await store.get('myRecipeRatio');
+  myRecipeRatio = savedRatio ? parseInt(savedRatio) : 3;
+  document.getElementById('ratioSlider').value = myRecipeRatio;
+  updateRatio(myRecipeRatio);
+  document.getElementById('settingsPeopleCnt').textContent = people;
+  document.getElementById('settingsRecipeCount').textContent = myRecipes.length;
+  document.getElementById('settingsOverlay').classList.add('open');
+  document.getElementById('settingsSheet').classList.add('open');
+}
+
+function closeSettings() {
+  document.getElementById('settingsOverlay').classList.remove('open');
+  document.getElementById('settingsSheet').classList.remove('open');
+}
+
+function updateRatio(val) {
+  myRecipeRatio = parseInt(val);
+  const myDays = myRecipeRatio;
+  const aiDays = 7 - myRecipeRatio;
+  document.getElementById('ratioMyCount').textContent = myDays;
+  document.getElementById('ratioAiCount').textContent = aiDays;
+  const myPct = (myDays / 7 * 100).toFixed(0);
+  document.getElementById('ratioBarMy').style.flex = myDays;
+  document.getElementById('ratioBarAi').style.flex = aiDays;
+  store.set('myRecipeRatio', myRecipeRatio);
+}
+
+function clearAllRecipes() {
+  if (myRecipes.length === 0) { showToast('登録済みレシピはありません'); return; }
+  myRecipes = [];
+  saveMyRecipes();
+  renderRecipes();
+  document.getElementById('settingsRecipeCount').textContent = 0;
+  showToast('🗑 マイレシピをすべて削除しました');
+}
+
+// ===== テキスト貼り付け取り込み =====
+function openTextModal() {
+  document.getElementById('textInput').value = '';
+  document.getElementById('textUrlInput').value = '';
+  document.getElementById('textModal').classList.add('open');
+}
+function closeTextModal() {
+  document.getElementById('textModal').classList.remove('open');
+}
+
+async function executeTextImport() {
+  const text = document.getElementById('textInput').value.trim();
+  const url = document.getElementById('textUrlInput').value.trim();
+  if (!text) { showToast('レシピの文章を貼り付けてください'); return; }
+  const apikey = await store.get('apikey');
+  if (!apikey) { showApiKeyScreen(); return; }
+
+  closeTextModal();
+  showAdding('📝 AIがレシピを整形中…');
+
+  const prompt = `以下はレシピサイトなどからコピーした文章です。この内容を整形してレシピデータにしてください。
+JSON形式のみで返答（説明不要）:
+{"name":"料理名","time":"調理時間","category":"主菜","ingredients":[{"name":"食材名","amount":"量"}],"steps":[{"text":"手順","tip":"コツ（なければ空文字）"}],"points":["ポイント1","ポイント2"]}
+
+【貼り付けられた文章】
+${text}`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apikey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] })
+    });
+    const data = await res.json();
+    const parsed = JSON.parse(data.content[0].text.replace(/```json|```/g, '').trim());
+    pendingRecipe = { id: 'r' + Date.now(), source: 'text', ...parsed };
+    if (url) pendingRecipe.url = url;
+    openPeopleModal();
+  } catch(e) { showToast('⚠️ レシピ化に失敗しました'); }
   finally { hideAdding(); }
 }
 
