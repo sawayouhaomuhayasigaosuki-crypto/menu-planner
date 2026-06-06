@@ -212,6 +212,18 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 .photo-viewer img{max-width:95vw;max-height:85vh;border-radius:12px;object-fit:contain;}
 .photo-viewer-close{position:absolute;top:20px;right:20px;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.2);border:none;color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
 
+/* インポートモーダル */
+.import-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:350;display:none;align-items:flex-end;justify-content:center;}
+.import-modal-overlay.open{display:flex;}
+.import-modal-card{background:var(--card);border-radius:22px 22px 0 0;padding:20px;width:100%;max-height:80vh;display:flex;flex-direction:column;}
+.import-modal-title{font-size:15px;font-weight:700;margin-bottom:6px;}
+.import-modal-sub{font-size:12px;color:var(--text-sub);margin-bottom:12px;line-height:1.6;}
+.import-textarea{width:100%;flex:1;min-height:180px;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:11px;font-family:monospace;outline:none;background:var(--bg);resize:none;}
+.import-textarea:focus{border-color:var(--primary);}
+.import-btns{display:flex;gap:8px;margin-top:12px;}
+.import-cancel{flex:1;padding:11px;background:var(--bg);border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;color:var(--text-sub);}
+.import-ok{flex:2;padding:11px;background:var(--secondary);color:#fff;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;}
+
 /* 人数確認モーダル */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:350;display:none;align-items:center;justify-content:center;padding:24px;}
 .modal-overlay.open{display:flex;}
@@ -322,6 +334,13 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 <!-- マイレシピタブ -->
 <div class="pane" id="pane-recipe">
   <div class="add-card">
+    <div class="add-lbl">📥 JSONから一括インポート</div>
+    <button class="photo-btn" onclick="openImportModal()" style="border-style:solid;border-color:var(--secondary);color:var(--secondary);">
+      📥 JSONを貼り付けて一括登録
+    </button>
+  </div>
+
+  <div class="add-card">
     <div class="add-lbl">🎬 YouTubeから登録</div>
     <div class="yt-row">
       <input class="yt-input" id="ytUrl" placeholder="YouTubeのURLを貼り付け…">
@@ -389,6 +408,19 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
     <button class="edit-save-btn" onclick="saveEdit()">保存</button>
   </div>
   <div class="edit-body" id="editBody"></div>
+</div>
+
+<!-- インポートモーダル -->
+<div class="import-modal-overlay" id="importModal">
+  <div class="import-modal-card">
+    <div class="import-modal-title">📥 JSONから一括インポート</div>
+    <div class="import-modal-sub">Claude.aiで生成したJSONを貼り付けてください。<br>既存のレシピはそのまま残り、新しいレシピが追加されます。</div>
+    <textarea class="import-textarea" id="importTextarea" placeholder='[{"name":"料理名","time":"20分","category":"主菜","ingredients":[...],"steps":[...],"points":[...]}]'></textarea>
+    <div class="import-btns">
+      <button class="import-cancel" onclick="closeImportModal()">キャンセル</button>
+      <button class="import-ok" onclick="executeImport()">📥 インポート</button>
+    </div>
+  </div>
 </div>
 
 <!-- 人数確認モーダル -->
@@ -662,9 +694,9 @@ function renderRecipes(){
   }
   grid.innerHTML=myRecipes.map(r=>`
     <div class="recipe-card" onclick="openMyRecipeSheet('${r.id}')">
-      <div class="recipe-thumb ${r.source}">${r.source==='youtube'?'🎬':'📷'}</div>
+      <div class="recipe-thumb ${r.source==='youtube'?'yt':r.source==='import'?'':' photo'}">${r.source==='youtube'?'🎬':r.source==='import'?'📥':'📷'}</div>
       <div class="recipe-info">
-        <div class="recipe-source ${r.source==='youtube'?'src-yt':'src-photo'}">${r.source==='youtube'?'🎬 YouTube':'📷 写真'}</div>
+        <div class="recipe-source ${r.source==='youtube'?'src-yt':'src-photo'}">${r.source==='youtube'?'🎬 YouTube':r.source==='import'?'📥 インポート':'📷 写真'}</div>
         <div class="recipe-name">${r.name}</div>
         <div class="recipe-tags">
           ${r.time?`<span class="recipe-tag time">⏱ ${r.time}</span>`:''}
@@ -770,6 +802,49 @@ JSON形式のみで返答（説明不要）:
   finally { hideAdding(); }
 }
 
+// ===== インポート =====
+function openImportModal() {
+  document.getElementById('importTextarea').value = '';
+  document.getElementById('importModal').classList.add('open');
+}
+
+function closeImportModal() {
+  document.getElementById('importModal').classList.remove('open');
+}
+
+async function executeImport() {
+  const text = document.getElementById('importTextarea').value.trim();
+  if (!text) { showToast('JSONを入力してください'); return; }
+
+  let parsed;
+  try {
+    // ```json ... ``` のマークダウンも対応
+    const clean = text.replace(/```json|```/g, '').trim();
+    parsed = JSON.parse(clean);
+  } catch(e) {
+    showToast('⚠️ JSONの形式が正しくありません');
+    return;
+  }
+
+  if (!Array.isArray(parsed)) {
+    showToast('⚠️ 配列形式のJSONを貼り付けてください');
+    return;
+  }
+
+  // 各レシピにIDとsourceを付与して追加
+  const newRecipes = parsed.map(r => ({
+    id: 'r' + Date.now() + Math.random().toString(36).slice(2),
+    source: 'import',
+    ...r
+  }));
+
+  myRecipes = [...myRecipes, ...newRecipes];
+  await saveMyRecipes();
+  renderRecipes();
+  closeImportModal();
+  showToast(`✅ ${newRecipes.length}品のレシピをインポートしました！`);
+}
+
 // ===== 人数確認モーダル =====
 let pendingRecipe = null;
 let modalPeople = 2;
@@ -796,8 +871,9 @@ function chgModalPeople(d) {
 async function confirmPeopleAndSave() {
   if (!pendingRecipe) return;
 
-  // 人数スケール処理
-  const ratio = people / modalPeople;
+  // peopleをlocalStorageから再取得して確実に使う
+  const savedPeople = parseInt(await store.get('people')) || people;
+  const ratio = savedPeople / modalPeople;
   if (ratio !== 1 && pendingRecipe.ingredients) {
     pendingRecipe.ingredients = pendingRecipe.ingredients.map(ing => {
       // 数値部分を抽出してスケール
@@ -814,7 +890,7 @@ async function confirmPeopleAndSave() {
   await saveMyRecipes();
   renderRecipes();
   closeModal();
-  showToast(`✅ ${people}人分に換算して登録しました！`);
+  showToast(`✅ ${savedPeople}人分に換算して登録しました！（${modalPeople}人分→${savedPeople}人分）`);
 }
 
 function scaleAmount(amountStr, ratio) {
