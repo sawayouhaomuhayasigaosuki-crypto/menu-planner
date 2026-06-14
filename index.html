@@ -598,6 +598,64 @@ function openIDB(){
 function idbSet(k,v){ return new Promise(res=>{ if(!idb){res();return;} const tx=idb.transaction('imgs','readwrite'); tx.objectStore('imgs').put(v,k); tx.oncomplete=res; tx.onerror=res; }); }
 function idbGet(k){ return new Promise(res=>{ if(!idb){res(null);return;} const tx=idb.transaction('imgs','readonly'); const req=tx.objectStore('imgs').get(k); req.onsuccess=()=>res(req.result); req.onerror=()=>res(null); }); }
 function idbDel(k){ return new Promise(res=>{ if(!idb){res();return;} const tx=idb.transaction('imgs','readwrite'); tx.objectStore('imgs').delete(k); tx.oncomplete=res; tx.onerror=res; }); }
+function idbAllKeys(){ return new Promise(res=>{ if(!idb){res([]);return;} const tx=idb.transaction('imgs','readonly'); const req=tx.objectStore('imgs').getAllKeys(); req.onsuccess=()=>res(req.result||[]); req.onerror=()=>res([]); }); }
+
+// ===== 写真ストレージ（IndexedDB + メモリキャッシュ） =====
+const photoCache = {}; // {id: dataUrl}
+
+async function savePhotoToIDB(dataUrl) {
+  const id = 'p' + Date.now() + Math.random().toString(36).slice(2, 8);
+  await idbSet(id, dataUrl);
+  photoCache[id] = dataUrl;
+  return 'idbref:' + id;
+}
+
+function resolvePhoto(ref) {
+  if (!ref) return ref;
+  if (ref.startsWith('idbref:')) return photoCache[ref.slice(7)] || '';
+  return ref; // 旧形式（base64直接）はそのまま
+}
+
+async function deletePhotoFromIDB(ref) {
+  if (ref && ref.startsWith('idbref:')) {
+    const id = ref.slice(7);
+    delete photoCache[id];
+    await idbDel(id);
+  }
+}
+
+async function loadAllPhotosToCache() {
+  const keys = await idbAllKeys();
+  for (const k of keys) {
+    const v = await idbGet(k);
+    if (v) photoCache[k] = v;
+  }
+}
+
+// 旧形式（localStorage内base64）→ IndexedDBへ自動移行
+async function migratePhotosToIDB() {
+  let changed = false;
+  for (const r of myRecipes) {
+    for (const s of (r.steps || [])) {
+      if (s.photo && s.photo.startsWith('data:')) {
+        s.photo = await savePhotoToIDB(s.photo);
+        changed = true;
+      }
+    }
+  }
+  if (changed) await saveMyRecipes();
+
+  let prepChanged = false;
+  for (const itemId of Object.keys(prepPhotos)) {
+    for (let i = 0; i < prepPhotos[itemId].length; i++) {
+      if (prepPhotos[itemId][i] && prepPhotos[itemId][i].startsWith('data:')) {
+        prepPhotos[itemId][i] = await savePhotoToIDB(prepPhotos[itemId][i]);
+        prepChanged = true;
+      }
+    }
+  }
+  if (prepChanged) await store.set('prepPhotos', JSON.stringify(prepPhotos));
+}
 
 // ===== INIT =====
 async function init(){
@@ -612,7 +670,10 @@ async function init(){
     renderMenus(); renderPrep(); renderShop(); showToast('📅 前回の献立を復元しました'); }catch(e){} }
   const sr = await store.get('myRecipes');
   if(sr){ try{ myRecipes=JSON.parse(sr); }catch(e){ myRecipes=[]; } }
+  await loadAllPhotosToCache();
+  await migratePhotosToIDB();
   renderRecipes();
+  if(currentData) renderPrep();
   const savedRatio = await store.get('myRecipeRatio');
   if(savedRatio) myRecipeRatio = parseInt(savedRatio);
 }
@@ -646,6 +707,48 @@ function switchTab(id,el){
 }
 function togTag(el){ el.classList.toggle('on'); }
 
+// ===== API共通ヘルパー（自動リトライ付き） =====
+// content: 文字列 or コンテンツ配列（画像+テキスト）
+// 失敗時（通信エラー・5xx・レート制限・JSON不正）は800ms待って自動で1回リトライする
+async function callClaudeJSON(content, maxTokens) {
+  const retries = 1;
+  const apikey = await store.get('apikey');
+  if (!apikey) { showApiKeyScreen(); throw new Error('APIキーが未設定です'); }
+  let lastErr = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) {
+      showToast('🔄 うまくいかなかったのでもう一度試しています…');
+      await new Promise(r => setTimeout(r, 800));
+    }
+    try {
+      let res;
+      try {
+        res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': apikey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+          body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: maxTokens, messages: [{ role: 'user', content }] })
+        });
+      } catch(fe) { lastErr = new Error('通信エラー: ' + fe.message); continue; }
+      if (!res.ok) {
+        let eb = {}; try { eb = await res.json(); } catch(e) {}
+        const msg = 'HTTPエラー ' + res.status + ': ' + (eb.error?.message || '');
+        if (res.status === 401 || res.status === 403) throw new Error(msg); // キー無効はリトライしても無駄
+        lastErr = new Error(msg); continue;
+      }
+      const data = await res.json();
+      const raw = (data.content?.[0]?.text || '').trim();
+      const m = raw.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      if (!m) { lastErr = new Error('AIの応答からJSONを取得できませんでした'); continue; }
+      try { return JSON.parse(m[0]); }
+      catch(pe) { lastErr = new Error('AIの応答の形式が不正でした'); continue; }
+    } catch(e) {
+      if ((e.message || '').match(/401|403/)) throw e;
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('API呼び出しに失敗しました');
+}
+
 // ===== PROPOSE =====
 async function propose(){
   const apikey=await store.get('apikey');
@@ -677,15 +780,7 @@ async function propose(){
 月〜日の7日分をすべて生成してください。ingredientsのbaseは${people}人分の数値。unitフィールド必須（野菜・豆腐・卵は束・個・丁・袋・枚など、肉・魚・調味料はg/ml）。baseは1以上の正の整数。主食と主菜は別の料理にすること。`;
 
   try{
-    let res;
-    try{ res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apikey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:4000,messages:[{role:'user',content:prompt}]})}); }
-    catch(fe){ throw new Error('通信エラー: '+fe.message+' / キー先頭: '+(apikey?apikey.slice(0,8):'なし')); }
-    if(!res.ok){ let eb={}; try{eb=await res.json();}catch(e){} throw new Error('HTTPエラー '+res.status+': '+(eb.error?.message||'')); }
-    const data=await res.json();
-    const raw=(data.content?.[0]?.text||'').trim();
-    const m=raw.match(/\{[\s\S]*\}/);
-    if(!m) throw new Error('JSON未検出');
-    const parsed=JSON.parse(m[0]);
+    const parsed=await callClaudeJSON(prompt,4000);
     if(!parsed.menus||!parsed.menus.length) throw new Error('献立データが空です');
     currentData=parsed;
     await store.set('currentData',JSON.stringify(parsed));
@@ -732,14 +827,11 @@ function cr(type,label,course,i){
 function togDay(i){ openDays[i]=!openDays[i]; renderMenus(); }
 
 async function retryCourse(dayIdx,course){
-  const apikey=await store.get('apikey'); if(!apikey) return;
   const m=currentData.menus[dayIdx];
   const label={staple:'主食',main:'主菜',side:'副菜',soup:'汁物'}[course];
   showToast('🔄 変更中…');
   try{
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apikey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:100,messages:[{role:'user',content:`${m.day}曜の${label}を1品提案。現在：主食${m.staple.name} 主菜${m.main.name} 副菜${m.side.name} 汁物${m.soup.name}。JSON形式のみ {"name":"料理名","time":"調理時間"}`}]})});
-    const data=await res.json();
-    const obj=JSON.parse(data.content[0].text.replace(/```json|```/g,'').trim());
+    const obj=await callClaudeJSON(`${m.day}曜の${label}を1品提案。現在：主食${m.staple.name} 主菜${m.main.name} 副菜${m.side.name} 汁物${m.soup.name}。JSON形式のみ {"name":"料理名","time":"調理時間"}`,100);
     currentData.menus[dayIdx][course]=obj; renderMenus();
     showToast(`✅ ${m.day}曜の${label}を変更しました`);
   }catch(e){ showToast('⚠️ 変更できませんでした'); }
@@ -765,9 +857,7 @@ async function openAiRecipe(dayIdx,courseType){
   document.getElementById('bsheet').classList.add('open');
 
   try{
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apikey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:1000,messages:[{role:'user',content:`「${course.name}」のレシピを${people}人分で。JSON形式のみ {"ingredients":[{"name":"食材名","amount":"量"}],"steps":[{"text":"手順","tip":"コツ（なければ空文字）"}],"points":["ポイント1","ポイント2","ポイント3"]}`}]})});
-    const data=await res.json();
-    currentRecipe=JSON.parse(data.content[0].text.replace(/```json|```/g,'').trim());
+    currentRecipe=await callClaudeJSON(`「${course.name}」のレシピを${people}人分で。JSON形式のみ {"ingredients":[{"name":"食材名","amount":"量"}],"steps":[{"text":"手順","tip":"コツ（なければ空文字）"}],"points":["ポイント1","ポイント2","ポイント3"]}`,1000);
     renderBsBody('ing');
   }catch(e){ document.getElementById('bs-body').innerHTML='<div style="color:#C0392B;padding:20px;font-size:13px;">レシピの取得に失敗しました</div>'; }
 }
@@ -806,7 +896,7 @@ function renderBsBody(tab){
         <div style="flex:1">
           <div class="step-txt">${s.text}</div>
           ${s.tip?`<div class="step-tip">💡 ${s.tip}</div>`:''}
-          ${s.photo?`<img class="step-photo" src="${s.photo}" onclick="openPhotoViewer('${s.photo}')">`:''}
+          ${s.photo?`<img class="step-photo" src="${resolvePhoto(s.photo)}" onclick="openPhotoViewer('${s.photo.startsWith('idbref:')?s.photo:''}')" data-ref="${s.photo}">`:''}
         </div>
       </div>`).join('');
   } else {
@@ -842,7 +932,12 @@ function renderRecipes(){
     </div>`).join('');
 }
 
-function deleteRecipe(id){ myRecipes=myRecipes.filter(r=>r.id!==id); saveMyRecipes(); renderRecipes(); showToast('🗑 削除しました'); }
+function deleteRecipe(id){
+  const r=myRecipes.find(x=>x.id===id);
+  if(r) (r.steps||[]).forEach(s=>{ if(s.photo) deletePhotoFromIDB(s.photo); });
+  myRecipes=myRecipes.filter(r=>r.id!==id);
+  saveMyRecipes(); renderRecipes(); showToast('🗑 削除しました');
+}
 
 // ===== YOUTUBE =====
 async function addFromYoutube(){
@@ -859,9 +954,7 @@ JSON形式のみで返答（説明不要）:
 {"name":"料理名","time":"調理時間","category":"主菜","ingredients":[{"name":"食材名","amount":"量"}],"steps":[{"text":"手順","tip":"コツ（なければ空文字）"}],"points":["ポイント1","ポイント2"]}`;
 
   try{
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apikey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:1000,messages:[{role:'user',content:prompt}]})});
-    const data=await res.json();
-    const parsed=JSON.parse(data.content[0].text.replace(/```json|```/g,'').trim());
+    const parsed=await callClaudeJSON(prompt,1000);
     pendingRecipe = {id:'r'+Date.now(),source:'youtube',url,...parsed};
     document.getElementById('ytUrl').value='';
     openPeopleModal();
@@ -919,14 +1012,7 @@ JSON形式のみで返答（説明不要）:
 {"name":"料理名","time":"調理時間","category":"主菜","ingredients":[{"name":"食材名","amount":"量"}],"steps":[{"text":"手順","tip":"コツ（なければ空文字）"}],"points":["ポイント1","ポイント2"]}`;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apikey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 1500,
-        messages: [{ role: 'user', content: [...imageContents, { type: 'text', text: prompt }] }] })
-    });
-    const data = await res.json();
-    const parsed = JSON.parse(data.content[0].text.replace(/```json|```/g, '').trim());
+    const parsed = await callClaudeJSON([...imageContents, { type: 'text', text: prompt }], 1500);
     // 人数確認モーダルを表示してから保存
     pendingRecipe = { id: 'r' + Date.now(), source: 'photo', ...parsed };
     openPeopleModal();
@@ -968,6 +1054,7 @@ function updateRatio(val) {
 
 function clearAllRecipes() {
   if (myRecipes.length === 0) { showToast('登録済みレシピはありません'); return; }
+  myRecipes.forEach(r => (r.steps||[]).forEach(s => { if(s.photo) deletePhotoFromIDB(s.photo); }));
   myRecipes = [];
   saveMyRecipes();
   renderRecipes();
@@ -1003,13 +1090,7 @@ JSON形式のみで返答（説明不要）:
 ${text}`;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apikey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] })
-    });
-    const data = await res.json();
-    const parsed = JSON.parse(data.content[0].text.replace(/```json|```/g, '').trim());
+    const parsed = await callClaudeJSON(prompt, 1500);
     pendingRecipe = { id: 'r' + Date.now(), source: 'text', ...parsed };
     if (url) pendingRecipe.url = url;
     openPeopleModal();
@@ -1169,7 +1250,7 @@ function openEdit(id){
 function stepBox(i,text,tip,photo,isNew){
   const pid=isNew?`sn-${i}`:`s-${i}`;
   const photoHtml=photo
-    ?`<img class="edit-photo-thumb" src="${photo}" onclick="openPhotoViewer('${photo}')">
+    ?`<img class="edit-photo-thumb" src="${resolvePhoto(photo)}" onclick="openPhotoViewer('${photo.startsWith&&photo.startsWith('idbref:')?photo:''}')">
       <button class="edit-del-btn" style="font-size:11px;width:auto;padding:4px 8px;border-radius:6px;" onclick="removeStepPhoto('${pid}')">写真削除</button>`
     :`<label class="edit-photo-add" id="pa-${pid}">
         <input type="file" accept="image/*" style="display:none" onchange="handleStepPhoto(this,'${pid}')">
@@ -1181,7 +1262,7 @@ function stepBox(i,text,tip,photo,isNew){
       <textarea class="edit-textarea" id="st-${pid}" style="flex:1;min-height:60px">${escHtml(text)}</textarea>
       <button class="edit-del-btn" onclick="document.getElementById('sb-${pid}').remove()">−</button>
     </div>
-    <div class="edit-photo-row" id="pr-${pid}">${photoHtml}</div>
+    <div class="edit-photo-row" id="pr-${pid}" ${photo?`data-photo="${photo}"`:''}>${photoHtml}</div>
   </div>`;
 }
 
@@ -1206,12 +1287,13 @@ function addStepRow(){
 function handleStepPhoto(input,pid){
   if(!input.files||!input.files[0]) return;
   const reader=new FileReader();
-  reader.onload=e=>{
+  reader.onload=async e=>{
     const src=e.target.result;
+    const ref=await savePhotoToIDB(src); // IndexedDBに保存して参照IDを得る
     const pr=document.getElementById('pr-'+pid);
-    pr.innerHTML=`<img class="edit-photo-thumb" src="${src}" onclick="openPhotoViewer('${src}')">
+    pr.innerHTML=`<img class="edit-photo-thumb" src="${src}" onclick="openPhotoViewer('${ref}')">
       <button class="edit-del-btn" style="font-size:11px;width:auto;padding:4px 8px;border-radius:6px;" onclick="removeStepPhoto('${pid}')">写真削除</button>`;
-    pr.dataset.photo=src;
+    pr.dataset.photo=ref;
     showToast('📷 写真を追加しました');
   };
   reader.readAsDataURL(input.files[0]);
@@ -1219,6 +1301,7 @@ function handleStepPhoto(input,pid){
 
 function removeStepPhoto(pid){
   const pr=document.getElementById('pr-'+pid);
+  if(pr.dataset.photo) deletePhotoFromIDB(pr.dataset.photo);
   delete pr.dataset.photo;
   pr.innerHTML=`<label class="edit-photo-add" id="pa-${pid}">
     <input type="file" accept="image/*" style="display:none" onchange="handleStepPhoto(this,'${pid}')">
@@ -1253,7 +1336,6 @@ function saveEdit(){
       const pr=document.getElementById('pr-'+pid);
       const step={text:el.value.trim(),tip:''};
       if(pr&&pr.dataset.photo) step.photo=pr.dataset.photo;
-      else if(pr){ const img=pr.querySelector('img'); if(img) step.photo=img.src; }
       steps.push(step);
     }
   });
@@ -1298,7 +1380,7 @@ function renderPrep(){
         <div class="prep-sec-ttl">${s.label}</div>
         ${s.items.map(item=>{
           const photos=prepPhotos[item.id]||[];
-          const photosHtml=photos.map((src,pi)=>`<img class="prep-photo-thumb" src="${src}" onclick="openPhotoViewer('${src}')">
+          const photosHtml=photos.map((ref,pi)=>`<img class="prep-photo-thumb" src="${resolvePhoto(ref)}" onclick="openPhotoViewer('${ref.startsWith&&ref.startsWith('idbref:')?ref:''}')">
             <button class="prep-photo-del" onclick="removePrepPhoto('${item.id}',${pi});event.stopPropagation()">削除</button>`).join('');
           return `<div class="prep-item">
             <div class="prep-item-top">
@@ -1331,8 +1413,9 @@ function addPrepPhoto(input,itemId){
   if(!input.files||!input.files[0]) return;
   const reader=new FileReader();
   reader.onload=async e=>{
+    const ref=await savePhotoToIDB(e.target.result); // IndexedDBに保存
     if(!prepPhotos[itemId]) prepPhotos[itemId]=[];
-    prepPhotos[itemId].push(e.target.result);
+    prepPhotos[itemId].push(ref);
     await store.set('prepPhotos',JSON.stringify(prepPhotos));
     renderPrep();
     showToast('📷 写真を追加しました');
@@ -1343,6 +1426,7 @@ function addPrepPhoto(input,itemId){
 
 function removePrepPhoto(itemId,idx){
   if(!prepPhotos[itemId]) return;
+  deletePhotoFromIDB(prepPhotos[itemId][idx]);
   prepPhotos[itemId].splice(idx,1);
   store.set('prepPhotos',JSON.stringify(prepPhotos));
   renderPrep();
@@ -1395,7 +1479,13 @@ function copyAll(){
 }
 
 // ===== PHOTO VIEWER =====
-function openPhotoViewer(src){ document.getElementById('photoViewerImg').src=src; document.getElementById('photoViewer').classList.add('open'); }
+function openPhotoViewer(src){
+  // ref渡し・base64渡し両対応。空ならイベント元のimgのsrcを使う
+  let resolved = resolvePhoto(src);
+  if (!resolved && event && event.target && event.target.src) resolved = event.target.src;
+  document.getElementById('photoViewerImg').src = resolved;
+  document.getElementById('photoViewer').classList.add('open');
+}
 function closePhotoViewer(){ document.getElementById('photoViewer').classList.remove('open'); }
 
 // ===== UTILS =====
