@@ -280,6 +280,37 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 .ak-btn{width:100%;margin-top:16px;padding:13px;background:var(--primary);color:#fff;border:none;border-radius:var(--radius-sm);font-size:14px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;}
 .ak-change{font-size:12px;color:var(--text-sub);text-align:center;margin-top:8px;cursor:pointer;text-decoration:underline;}
 
+/* 条件カード拡張 */
+.cuisine-row{display:flex;gap:8px;margin-bottom:10px;align-items:center;}
+.cuisine-label{font-size:12px;font-weight:500;color:var(--text-sub);min-width:36px;flex-shrink:0;}
+.cuisine-slider{flex:1;accent-color:var(--primary);}
+.cuisine-count{font-size:12px;font-weight:700;min-width:28px;text-align:right;color:var(--text);}
+.cuisine-display{display:flex;height:8px;border-radius:4px;overflow:hidden;margin-bottom:8px;}
+.cuisine-jp{background:#D4622A;transition:flex .2s;}
+.cuisine-west{background:#3D6B5E;transition:flex .2s;}
+.cuisine-cn{background:#C49A2B;transition:flex .2s;}
+.cuisine-legend{display:flex;gap:10px;margin-bottom:10px;}
+.cuisine-legend-item{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-sub);}
+.cuisine-legend-dot{width:8px;height:8px;border-radius:50%;}
+.stock-input{width:100%;padding:9px 12px;border-radius:var(--radius-sm);border:1.5px solid var(--border);font-size:13px;font-family:'Noto Sans JP',sans-serif;outline:none;background:var(--bg);margin-top:4px;}
+.stock-input:focus{border-color:var(--primary);}
+
+/* 履歴タブ */
+.confirm-btn{width:100%;padding:13px;background:var(--secondary);color:#fff;border:none;border-radius:var(--radius);font-size:14px;font-weight:700;font-family:'Noto Sans JP',sans-serif;cursor:pointer;margin-bottom:14px;box-shadow:0 4px 16px rgba(61,107,94,.3);display:flex;align-items:center;justify-content:center;gap:6px;}
+.confirm-btn:active{transform:scale(.98);}
+.history-card{background:var(--card);border-radius:var(--radius);margin-bottom:12px;box-shadow:var(--shadow-sm);overflow:hidden;}
+.history-hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--secondary-light);cursor:pointer;}
+.history-hdr-l{display:flex;align-items:center;gap:10px;}
+.history-week-badge{padding:3px 10px;border-radius:8px;background:var(--secondary);color:#fff;font-size:11px;font-weight:700;}
+.history-date{font-size:12px;color:var(--text-sub);}
+.history-body{padding:10px 14px 12px;}
+.history-row{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;align-items:center;}
+.history-row:last-child{border-bottom:none;}
+.history-day{width:24px;font-weight:700;color:var(--secondary);flex-shrink:0;}
+.history-dishes{flex:1;color:var(--text-sub);}
+.history-main{font-weight:600;color:var(--text);}
+.history-del{background:none;border:none;color:var(--text-sub);font-size:14px;cursor:pointer;padding:2px 6px;}
+
 /* TOAST / ERROR / EMPTY */
 .toast{position:fixed;bottom:84px;left:50%;transform:translateX(-50%) translateY(16px);background:#1E1E1E;color:#fff;padding:9px 18px;border-radius:20px;font-size:13px;font-weight:500;opacity:0;transition:all .3s;z-index:400;white-space:nowrap;pointer-events:none;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
@@ -323,12 +354,13 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
   <button class="tab" onclick="switchTab('recipe',this)">📖 レシピ</button>
   <button class="tab" onclick="switchTab('prep',this)">🧊 仕込み</button>
   <button class="tab" onclick="switchTab('shop',this)">🛒 買い物</button>
+  <button class="tab" onclick="switchTab('history',this)">📋 履歴</button>
 </div>
 
 <!-- 献立タブ -->
 <div class="pane active" id="pane-menu">
   <div class="setup-card">
-    <div class="setup-label">🎯 条件</div>
+    <div class="setup-label">🎯 基本条件</div>
     <div class="tag-row">
       <div class="tag on" onclick="togTag(this)" data-v="30分以内">⏱ 30分以内</div>
       <div class="tag on" onclick="togTag(this)" data-v="子供向け">👧 子供向け</div>
@@ -336,8 +368,46 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
       <div class="tag" onclick="togTag(this)" data-v="節約重視">💰 節約</div>
       <div class="tag" onclick="togTag(this)" data-v="魚を増やす">🐟 魚多め</div>
       <div class="tag" onclick="togTag(this)" data-v="麺の日を増やす">🍝 麺多め</div>
+      <div class="tag" id="tagMaternity" onclick="togMaternity(this)">🤰 妊婦向け</div>
     </div>
     <input class="txt-in" id="avoidIn" placeholder="苦手・アレルギー食材（例：セロリ、貝類）">
+  </div>
+
+  <!-- 料理ジャンル比率 -->
+  <div class="setup-card">
+    <div class="setup-label">🍱 料理ジャンルの比率（7日分）</div>
+    <div class="cuisine-display">
+      <div class="cuisine-jp" id="cuisineBarJp" style="flex:3"></div>
+      <div class="cuisine-west" id="cuisineBarWest" style="flex:3"></div>
+      <div class="cuisine-cn" id="cuisineBarCn" style="flex:1"></div>
+    </div>
+    <div class="cuisine-legend">
+      <div class="cuisine-legend-item"><div class="cuisine-legend-dot" style="background:#D4622A"></div>和食</div>
+      <div class="cuisine-legend-item"><div class="cuisine-legend-dot" style="background:#3D6B5E"></div>洋食</div>
+      <div class="cuisine-legend-item"><div class="cuisine-legend-dot" style="background:#C49A2B"></div>中華</div>
+    </div>
+    <div class="cuisine-row">
+      <span class="cuisine-label">🍱 和食</span>
+      <input class="cuisine-slider" type="range" id="sliderJp" min="0" max="7" value="3" oninput="updateCuisine()">
+      <span class="cuisine-count" id="cntJp">3</span>日
+    </div>
+    <div class="cuisine-row">
+      <span class="cuisine-label">🍝 洋食</span>
+      <input class="cuisine-slider" type="range" id="sliderWest" min="0" max="7" value="3" oninput="updateCuisine()">
+      <span class="cuisine-count" id="cntWest">3</span>日
+    </div>
+    <div class="cuisine-row">
+      <span class="cuisine-label">🥢 中華</span>
+      <input class="cuisine-slider" type="range" id="sliderCn" min="0" max="7" value="1" oninput="updateCuisine()">
+      <span class="cuisine-count" id="cntCn">1</span>日
+    </div>
+    <div style="font-size:11px;color:var(--text-sub);">※合計が7日を超える場合は自動調整されます</div>
+  </div>
+
+  <!-- 今ある食材を消費 -->
+  <div class="setup-card">
+    <div class="setup-label">🧹 今ある食材を使いたい</div>
+    <input class="stock-input" id="stockIn" placeholder="例：ほうれん草、豆腐、鶏むね肉（カンマ区切り）">
   </div>
   <div class="err-box" id="errBox"></div>
   <button class="propose-btn" id="proposeBtn" onclick="propose()">✨ 今週の献立を提案する</button>
@@ -347,6 +417,7 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
     <div class="loading-sub">主食・主菜・副菜・汁物＋仕込みプランを生成中</div>
   </div>
   <div id="menuList"></div>
+  <button class="confirm-btn" id="confirmBtn" onclick="confirmMenu()" style="display:none;">✅ 今週の献立を確定する</button>
   <div style="text-align:right;margin-bottom:8px;">
     <span class="ak-change" onclick="showApiKeyScreen()">🔑 APIキーを変更</span>
   </div>
@@ -404,6 +475,11 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
     <button class="copy-btn" id="copyBtn" onclick="copyAll()">📋 コピー</button>
   </div>
   <div id="shopList"><div class="empty"><div class="empty-icon">🛒</div>先に献立を提案してください</div></div>
+</div>
+
+<!-- 履歴タブ -->
+<div class="pane" id="pane-history">
+  <div id="historyList"><div class="empty"><div class="empty-icon">📋</div>確定した献立が履歴に表示されます</div></div>
 </div>
 
 <!-- オーバーレイ -->
@@ -667,7 +743,9 @@ async function init(){
   const sd = await store.get('currentData');
   if(sd){ try{ currentData=JSON.parse(sd); openDays={0:true}; const sc=await store.get('prepChecked'); prepChecked=sc?JSON.parse(sc):{};
     const spp=await store.get('prepPhotos'); prepPhotos=spp?JSON.parse(spp):{};
-    renderMenus(); renderPrep(); renderShop(); showToast('📅 前回の献立を復元しました'); }catch(e){} }
+    renderMenus(); renderPrep(); renderShop();
+    document.getElementById('confirmBtn').style.display='flex';
+    showToast('📅 前回の献立を復元しました'); }catch(e){} }
   const sr = await store.get('myRecipes');
   if(sr){ try{ myRecipes=JSON.parse(sr); }catch(e){ myRecipes=[]; } }
   await loadAllPhotosToCache();
@@ -676,6 +754,8 @@ async function init(){
   if(currentData) renderPrep();
   const savedRatio = await store.get('myRecipeRatio');
   if(savedRatio) myRecipeRatio = parseInt(savedRatio);
+  await loadHistory();
+  await loadCuisineSettings();
 }
 init();
 
@@ -704,8 +784,45 @@ function switchTab(id,el){
   el.classList.add('active');
   document.querySelectorAll('.pane').forEach(p=>p.classList.remove('active'));
   document.getElementById('pane-'+id).classList.add('active');
+  if(id==='history') renderHistory();
 }
 function togTag(el){ el.classList.toggle('on'); }
+
+// 妊婦向けタグ
+let maternityOn = false;
+function togMaternity(el) {
+  maternityOn = !maternityOn;
+  el.classList.toggle('on', maternityOn);
+}
+
+// 料理ジャンルスライダー
+function updateCuisine() {
+  const jp = parseInt(document.getElementById('sliderJp').value);
+  const west = parseInt(document.getElementById('sliderWest').value);
+  const cn = parseInt(document.getElementById('sliderCn').value);
+  document.getElementById('cntJp').textContent = jp;
+  document.getElementById('cntWest').textContent = west;
+  document.getElementById('cntCn').textContent = cn;
+  const total = jp + west + cn || 1;
+  document.getElementById('cuisineBarJp').style.flex = jp;
+  document.getElementById('cuisineBarWest').style.flex = west;
+  document.getElementById('cuisineBarCn').style.flex = cn || 0.1;
+  // localStorage保存
+  store.set('cuisineJp', jp);
+  store.set('cuisineWest', west);
+  store.set('cuisineCn', cn);
+}
+
+// ジャンル設定の復元
+async function loadCuisineSettings() {
+  const jp = await store.get('cuisineJp');
+  const west = await store.get('cuisineWest');
+  const cn = await store.get('cuisineCn');
+  if (jp !== null) document.getElementById('sliderJp').value = jp;
+  if (west !== null) document.getElementById('sliderWest').value = west;
+  if (cn !== null) document.getElementById('sliderCn').value = cn;
+  updateCuisine();
+}
 
 // ===== API共通ヘルパー（自動リトライ付き） =====
 // content: 文字列 or コンテンツ配列（画像+テキスト）
@@ -755,26 +872,71 @@ async function propose(){
   if(!apikey){ showApiKeyScreen(); return; }
   const tags=[...document.querySelectorAll('.tag.on')].map(t=>t.dataset.v);
   const avoid=document.getElementById('avoidIn').value.trim();
+  const stock=document.getElementById('stockIn').value.trim();
+  const jp = parseInt(document.getElementById('sliderJp').value);
+  const west = parseInt(document.getElementById('sliderWest').value);
+  const cn = parseInt(document.getElementById('sliderCn').value);
   setLoading(true); hideErr();
 
-  // マイレシピからランダムに3〜4品ピックアップ
+  // マイレシピをカテゴリ別にシャッフルして確率でランダム割り当て
   const DAYS = ['月','火','水','木','金','土','日'];
   let myRecipeHint = '';
   if (myRecipes.length > 0) {
-    const shuffled = [...myRecipes].sort(() => Math.random() - 0.5);
     const savedRatio = await store.get('myRecipeRatio');
     const targetCount = savedRatio ? parseInt(savedRatio) : 3;
-    const pickCount = Math.min(myRecipes.length, targetCount);
-    const picked = shuffled.slice(0, pickCount);
-    // ランダムな曜日に割り当て
-    const assignedDays = [...DAYS].sort(() => Math.random() - 0.5).slice(0, picked.length);
-    myRecipeHint = '\n\n【マイレシピから使ってほしい料理（指定曜日の主菜に採用すること）】\n' +
-      picked.map((r, i) => `${assignedDays[i]}曜：${r.name}（${r.category||'主菜'}）`).join('\n');
+    // 比率を確率に変換（例：3/7 ≒ 43%の確率でマイレシピを使う）
+    const myProb = targetCount / 7;
+
+    // カテゴリ別にシャッフル
+    const byCategory = { '主食': [], '主菜': [], '副菜': [], '汁物': [] };
+    [...myRecipes].sort(() => Math.random() - 0.5).forEach(r => {
+      const cat = r.category || '主菜';
+      if (byCategory[cat]) byCategory[cat].push(r);
+    });
+
+    // 各曜日・各カテゴリに対してランダムに採否を決定
+    const hints = [];
+    const cats = ['主菜', '副菜', '汁物', '主食'];
+    DAYS.forEach(day => {
+      cats.forEach(cat => {
+        if (byCategory[cat].length > 0 && Math.random() < myProb) {
+          const recipe = byCategory[cat].shift();
+          hints.push(`${day}曜の${cat}：${recipe.name}`);
+        }
+      });
+    });
+
+    if (hints.length > 0) {
+      myRecipeHint = '\n\n【マイレシピから使ってほしい料理（指定曜日・指定カテゴリに必ず採用すること）】\n' + hints.join('\n');
+    }
   }
+
+  // 直近2週間の被り防止ヒント
+  let historyHint = '';
+  if (menuHistory.length > 0) {
+    const recentMains = menuHistory.slice(0, 2)
+      .flatMap(h => h.menus.map(m => m.main))
+      .filter(Boolean);
+    if (recentMains.length > 0) {
+      historyHint = `
+
+【直近の献立で使った主菜（なるべく避けること）】
+${recentMains.join('、')}`;
+    }
+  }
+
+  // 追加条件テキスト生成
+  const cuisineHint = `
+
+【料理ジャンルの目安（7日中）】和食:${jp}日・洋食:${west}日・中華:${cn}日。合計が7日を超える場合は比率に合わせて調整すること。`;
+  const maternityHint = maternityOn ? '\n\n【妊婦向け対応】葉酸・鉄分・カルシウムが豊富な食材を積極的に使うこと（ほうれん草・小松菜・大豆製品・ひじき・鮭など）。生魚・生肉・加工肉は避けること。' : '';
+  const stockHint = stock ? `
+
+【必ず使いたい食材】${stock}。これらの食材をなるべく今週の献立に組み込むこと。` : '';
 
   const prompt=`一週間分（月〜日）の夕食献立をJSON形式で返してください。
 条件：人数${people}人、要望：${tags.join('、')||'なし'}、除外食材：${avoid||'なし'}
-ルール：各日に主食・主菜・副菜・汁物の4品。主食は白米だけでなくパスタ・うどん・丼・パンなどバリエーションをつける。食材の使い回しを考慮する。毎回異なるバリエーションの献立にすること。${myRecipeHint}
+ルール：各日に主食・主菜・副菜・汁物の4品。主食は白米だけでなくパスタ・うどん・丼・パンなどバリエーションをつける。食材の使い回しを考慮する。毎回異なるバリエーションの献立にすること。${cuisineHint}${maternityHint}${stockHint}${myRecipeHint}${historyHint}
 必ず以下のJSON構造のみを返してください。前置き・説明・マークダウン記法は一切不要です。{で始めて}で終わること。
 {"menus":[{"day":"月","staple":{"name":"白米"},"main":{"name":"豚の生姜焼き","time":"20分"},"side":{"name":"ほうれん草のお浸し","time":"10分"},"soup":{"name":"味噌汁","time":"5分"},"ingredients":[{"cat":"肉・魚","name":"豚ロース","base":200,"unit":"g"},{"cat":"野菜","name":"玉ねぎ","base":1,"unit":"個"}]}],"prep":{"makeAhead":[{"id":"p1","days":["木"],"title":"ひじきの煮物","desc":"日曜に仕込んでおくと木曜まで保存OK"}],"marinade":[{"id":"m1","days":["月"],"title":"豚肉の下味冷凍","desc":"ジップロックに豚肉＋醤油大1・みりん大1・生姜を入れて冷凍"}],"cut":[{"id":"c1","days":["水"],"title":"カレー用野菜カット","desc":"火曜夜にじゃがいも・にんじん・玉ねぎをカットして冷蔵保存"}]}}
 月〜日の7日分をすべて生成してください。ingredientsのbaseは${people}人分の数値。unitフィールド必須（野菜・豆腐・卵は束・個・丁・袋・枚など、肉・魚・調味料はg/ml）。baseは1以上の正の整数。主食と主菜は別の料理にすること。`;
@@ -787,6 +949,7 @@ async function propose(){
     await store.set('prepChecked',JSON.stringify({}));
     openDays={0:true}; prepChecked={};
     renderMenus(); renderPrep(); renderShop();
+    document.getElementById('confirmBtn').style.display='flex';
     showToast('✅ 今週の献立を提案しました！');
   }catch(e){ showErr(e.message||'エラーが発生しました'); }
   finally{ setLoading(false); }
@@ -1018,6 +1181,92 @@ JSON形式のみで返答（説明不要）:
     openPeopleModal();
   } catch(e) { showToast('⚠️ 読み取りに失敗しました。写真を確認してください'); }
   finally { hideAdding(); }
+}
+
+// ===== 履歴 =====
+let menuHistory = []; // [{id, confirmedAt, weekLabel, menus}]
+
+async function loadHistory() {
+  const s = await store.get('menuHistory');
+  if(s) { try { menuHistory = JSON.parse(s); } catch(e) { menuHistory = []; } }
+}
+
+async function saveHistory() {
+  await store.set('menuHistory', JSON.stringify(menuHistory));
+}
+
+async function confirmMenu() {
+  if (!currentData || !currentData.menus) { showToast('先に献立を提案してください'); return; }
+
+  const now = new Date();
+  const weekLabel = `${now.getFullYear()}年${now.getMonth()+1}月${now.getDate()}日の週`;
+  const entry = {
+    id: 'h' + Date.now(),
+    confirmedAt: now.toISOString(),
+    weekLabel,
+    menus: currentData.menus.map(m => ({
+      day: m.day,
+      staple: m.staple.name,
+      main: m.main.name,
+      side: m.side.name,
+      soup: m.soup.name,
+    }))
+  };
+
+  // 最新10週分だけ保持
+  menuHistory.unshift(entry);
+  if (menuHistory.length > 10) menuHistory = menuHistory.slice(0, 10);
+  await saveHistory();
+
+  document.getElementById('confirmBtn').style.display = 'none';
+  showToast('✅ 今週の献立を履歴に保存しました！');
+}
+
+function renderHistory() {
+  const container = document.getElementById('historyList');
+  if (!menuHistory.length) {
+    container.innerHTML = '<div class="empty"><div class="empty-icon">📋</div>確定した献立が履歴に表示されます</div>';
+    return;
+  }
+  container.innerHTML = menuHistory.map((h, hi) => {
+    const date = new Date(h.confirmedAt);
+    const dateStr = `${date.getMonth()+1}/${date.getDate()} 確定`;
+    const isOpen = hi === 0; // 最新は開く
+    return `
+    <div class="history-card">
+      <div class="history-hdr" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+        <div class="history-hdr-l">
+          <span class="history-week-badge">第${menuHistory.length - hi}週</span>
+          <div>
+            <div style="font-size:13px;font-weight:700;">${h.weekLabel}</div>
+            <div class="history-date">${dateStr}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="history-del" onclick="deleteHistory('${h.id}');event.stopPropagation()">🗑</button>
+          <span style="font-size:13px;color:var(--text-sub);">▼</span>
+        </div>
+      </div>
+      <div class="history-body" style="${isOpen?'':'display:none'}">
+        ${h.menus.map(m => `
+          <div class="history-row">
+            <span class="history-day">${m.day}</span>
+            <div class="history-dishes">
+              <span class="history-main">${m.main}</span>
+              <span style="margin:0 4px;">·</span>${m.side}
+              <span style="margin:0 4px;">·</span>${m.soup}
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function deleteHistory(id) {
+  menuHistory = menuHistory.filter(h => h.id !== id);
+  await saveHistory();
+  renderHistory();
+  showToast('🗑 削除しました');
 }
 
 // ===== 設定 =====
